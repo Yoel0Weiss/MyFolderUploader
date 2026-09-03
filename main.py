@@ -1,8 +1,10 @@
 import os
 import time
 import asyncio
+import mimetypes # <-- הוספנו את המודול הזה
 from dotenv import load_dotenv
 from telethon import TelegramClient
+from telethon.tl.types import DocumentAttributeAudio
 from natsort import natsorted
 
 # 1. Load secrets from .env file
@@ -15,6 +17,9 @@ try:
     TARGET_CHAT_ID = int(TARGET_CHAT_ID)
 except (ValueError, TypeError):
     pass
+
+# Initialize mimetypes (optional but good practice to ensure it's loaded)
+mimetypes.init()
 
 # 2. Initialize Telegram Client
 client = TelegramClient('uploader_session', API_ID, API_HASH)
@@ -57,21 +62,16 @@ async def progress_callback(current, total):
     global uploaded_bytes_before_current_file, total_bytes_to_upload, upload_start_time
     
     total_uploaded_now = uploaded_bytes_before_current_file + current
-    
     elapsed_time = time.time() - upload_start_time
     
     if elapsed_time > 0 and total_uploaded_now > 0:
-        # Calculate speed (bytes per second)
         speed = total_uploaded_now / elapsed_time
-        # Calculate remaining bytes
         remaining_bytes = total_bytes_to_upload - total_uploaded_now
-        # Calculate ETA
         eta_seconds = remaining_bytes / speed
         eta_str = format_time(eta_seconds)
     else:
          eta_str = "Calculating..."
          
-    # We clear the line and print the new info
     percentage = (total_uploaded_now / total_bytes_to_upload) * 100 if total_bytes_to_upload > 0 else 0
     print(f"\rUploading... {percentage:.1f}% | ETA: {eta_str}   ", end='', flush=True)
 
@@ -80,7 +80,7 @@ async def process_directory(base_path):
     """Main logic: mapping, directory traversal (DFS), and uploading"""
     global total_bytes_to_upload, uploaded_bytes_before_current_file, upload_start_time
     
-    # 1. First Pass: Calculate total bytes to upload
+    # First Pass: Calculate total bytes to upload
     total_bytes_to_upload = 0
     for root, dirs, files in os.walk(base_path):
          for f in files:
@@ -97,7 +97,7 @@ async def process_directory(base_path):
     
     await client.send_message(TARGET_CHAT_ID, tree_text)
     
-    upload_start_time = time.time() # Start the timer right before the first upload
+    upload_start_time = time.time() 
 
     for root, dirs, files in os.walk(base_path):
         if not files:
@@ -117,14 +117,34 @@ async def process_directory(base_path):
             
             print(f"\nStarting upload for: {file_name}")
             
-            await client.send_file(
-                TARGET_CHAT_ID,
-                file_path,
-                caption=file_name,
-                progress_callback=progress_callback
-            )
+            # --- Dynamic MIME Type Detection ---
+            # mimetypes.guess_type returns a tuple: (type, encoding). We only need the type.
+            mime_type, _ = mimetypes.guess_type(file_path)
             
-            # After a successful upload, add its size to the global counter
+            # If guess_type fails, it returns None. We default to empty string to avoid errors.
+            if mime_type is None:
+                mime_type = ""
+
+            # Check if the dynamic type is audio
+            if mime_type.startswith('audio/'):
+                 attributes = [DocumentAttributeAudio(duration=0, title=file_name, performer="")]
+                 await client.send_file(
+                    TARGET_CHAT_ID,
+                    file_path,
+                    caption=file_name,
+                    attributes=attributes,
+                    force_document=False, # Important: Let Telegram render it as audio
+                    progress_callback=progress_callback
+                )
+            else:
+                # All other files (documents, text, unknown) upload as regular files
+                await client.send_file(
+                    TARGET_CHAT_ID,
+                    file_path,
+                    caption=file_name,
+                    progress_callback=progress_callback
+                )
+            
             uploaded_bytes_before_current_file += file_size
             await asyncio.sleep(2)
 
