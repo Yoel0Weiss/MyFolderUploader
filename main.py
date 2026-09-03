@@ -3,7 +3,7 @@ import time
 import asyncio
 import mimetypes
 from dotenv import load_dotenv
-from telethon import TelegramClient
+from telethon import TelegramClient, errors
 from telethon.tl.types import DocumentAttributeAudio
 from natsort import natsorted
 
@@ -23,23 +23,29 @@ mimetypes.init()
 # 2. Initialize Telegram Client
 client = TelegramClient('uploader_session', API_ID, API_HASH)
 
-HISTORY_FILE = 'uploaded_history.txt'
+HISTORY_FILE_NAME = 'uploaded_history.txt'
 
 # Global variables for ETA calculation across multiple files
 total_bytes_to_upload = 0
 uploaded_bytes_before_current_file = 0
 upload_start_time = 0
 
-def load_history():
-    """Loads the list of already uploaded files"""
-    if os.path.exists(HISTORY_FILE):
-        with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+def get_history_file_path(base_path):
+    """Returns the path to the history file inside the target directory"""
+    return os.path.join(base_path, HISTORY_FILE_NAME)
+
+def load_history(base_path):
+    """Loads the list of already uploaded files for this specific directory"""
+    history_path = get_history_file_path(base_path)
+    if os.path.exists(history_path):
+        with open(history_path, 'r', encoding='utf-8') as f:
             return set(line.strip() for line in f if line.strip())
     return set()
 
-def save_to_history(relative_file_path):
-    """Saves a successfully uploaded file to the history log"""
-    with open(HISTORY_FILE, 'a', encoding='utf-8') as f:
+def save_to_history(base_path, relative_file_path):
+    """Saves a successfully uploaded file to the history log inside the directory"""
+    history_path = get_history_file_path(base_path)
+    with open(history_path, 'a', encoding='utf-8') as f:
         f.write(f"{relative_file_path}\n")
 
 def format_time(seconds):
@@ -66,7 +72,9 @@ def generate_tree(dir_path):
         
         sub_indent = ' ' * 4 * (level + 1)
         for f in natsorted(files):
-            tree_str += f"{sub_indent}📄 {f}\n"
+            # Do not show the history file itself in the tree
+            if f != HISTORY_FILE_NAME:
+                tree_str += f"{sub_indent}📄 {f}\n"
     return tree_str
 
 async def progress_callback(current, total):
@@ -92,7 +100,7 @@ async def process_directory(base_path):
     """Main logic: mapping, directory traversal (DFS), and uploading"""
     global total_bytes_to_upload, uploaded_bytes_before_current_file, upload_start_time
     
-    uploaded_history = load_history()
+    uploaded_history = load_history(base_path)
     is_resume = len(uploaded_history) > 0
     
     # First Pass: Calculate total bytes ONLY for files that haven't been uploaded yet
@@ -101,8 +109,12 @@ async def process_directory(base_path):
     
     for root, dirs, files in os.walk(base_path):
          for f in files:
+             if f == HISTORY_FILE_NAME:
+                 continue
+                 
              file_path = os.path.join(root, f)
              rel_path = os.path.relpath(file_path, base_path)
+             
              if rel_path not in uploaded_history:
                  total_bytes_to_upload += os.path.getsize(file_path)
                  files_to_upload_exist = True
@@ -113,7 +125,6 @@ async def process_directory(base_path):
              
     uploaded_bytes_before_current_file = 0
     
-    # Only send the directory tree if this is a fresh start (not a resume)
     if not is_resume:
         print("Generating and sending directory tree to Telegram...")
         tree_text = generate_tree(base_path)
@@ -121,7 +132,7 @@ async def process_directory(base_path):
             tree_text = tree_text[:4000] + "\n... (Tree is too long and was truncated)"
         await client.send_message(TARGET_CHAT_ID, tree_text)
     else:
-        print(f"Resuming upload. Found {len(uploaded_history)} files already uploaded. Skipping tree generation.")
+        print(f"Resuming upload. Found {len(uploaded_history)} files already uploaded.")
     
     upload_start_time = time.time() 
 
@@ -131,9 +142,10 @@ async def process_directory(base_path):
         
         relative_path = os.path.relpath(root, base_path)
         
-        # Check if there are actually any files left to upload in this specific directory
-        # so we don't send empty "📂 Current Directory" messages
-        remaining_files_in_dir = [f for f in files if os.path.relpath(os.path.join(root, f), base_path) not in uploaded_history]
+        remaining_files_in_dir = [
+            f for f in files 
+            if f != HISTORY_FILE_NAME and os.path.relpath(os.path.join(root, f), base_path) not in uploaded_history
+        ]
         
         if remaining_files_in_dir and relative_path != ".":
             path_display = f"{os.path.basename(base_path)} > " + relative_path.replace(os.sep, ' > ')
@@ -142,10 +154,12 @@ async def process_directory(base_path):
         sorted_files = natsorted(files)
         
         for file_name in sorted_files:
+            if file_name == HISTORY_FILE_NAME:
+                continue
+                
             file_path = os.path.join(root, file_name)
             rel_file_path = os.path.relpath(file_path, base_path)
             
-            # Skip if already uploaded
             if rel_file_path in uploaded_history:
                 continue
                 
@@ -157,34 +171,42 @@ async def process_directory(base_path):
             if mime_type is None:
                 mime_type = ""
 
-            try:
-                if mime_type.startswith('audio/'):
-                     attributes = [DocumentAttributeAudio(duration=0, title=file_name, performer="")]
-                     await client.send_file(
-                        TARGET_CHAT_ID,
-                        file_path,
-                        caption=file_name,
-                        attributes=attributes,
-                        force_document=False,
-                        progress_callback=progress_callback
-                    )
-                else:
-                    await client.send_file(
-                        TARGET_CHAT_ID,
-                        file_path,
-                        caption=file_name,
-                        progress_callback=progress_callback
-                    )
-                
-                # IMPORTANT: Save to history only after a SUCCESSFUL upload
-                save_to_history(rel_file_path)
-                uploaded_bytes_before_current_file += file_size
-                await asyncio.sleep(2)
-                
-            except Exception as e:
-                print(f"\nAn error occurred while uploading {file_name}: {e}")
-                print("You can restart the script to resume from this point.")
-                return # Stop the script safely
+            # Infinite loop to handle FloodWait retries for the current file
+            while True:
+                try:
+                    if mime_type.startswith('audio/'):
+                         attributes = [DocumentAttributeAudio(duration=0, title=file_name, performer="")]
+                         await client.send_file(
+                            TARGET_CHAT_ID,
+                            file_path,
+                            caption=file_name,
+                            attributes=attributes,
+                            force_document=False,
+                            progress_callback=progress_callback
+                        )
+                    else:
+                        await client.send_file(
+                            TARGET_CHAT_ID,
+                            file_path,
+                            caption=file_name,
+                            progress_callback=progress_callback
+                        )
+                    
+                    # If we reached here, upload was successful
+                    save_to_history(base_path, rel_file_path)
+                    uploaded_bytes_before_current_file += file_size
+                    await asyncio.sleep(2)
+                    break # Exit the while loop and move to the next file
+                    
+                except errors.FloodWaitError as e:
+                    print(f"\n⏳ Telegram rate limit hit! Sleeping for {e.seconds} seconds to avoid ban...")
+                    # Automatically sleep and then the while loop will try sending the SAME file again
+                    await asyncio.sleep(e.seconds)
+                    
+                except Exception as e:
+                    print(f"\n❌ An unrecoverable error occurred while uploading {file_name}: {e}")
+                    print("Stopping the script safely. You can restart to resume.")
+                    return 
 
 async def main():
     raw_input = input("Enter the full path to the directory you want to upload: ")
@@ -199,10 +221,6 @@ async def main():
     print("Successfully connected! Starting process...")
     
     await process_directory(folder_to_upload)
-    
-    # Optional: Once everything is 100% done, you can delete the history file to start fresh next time
-    # if os.path.exists(HISTORY_FILE):
-    #     os.remove(HISTORY_FILE)
     
     print("\n✅ Done! All files have been processed.")
 
