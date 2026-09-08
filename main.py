@@ -92,22 +92,43 @@ async def send_long_message(chat_id, text, max_length=4000):
     if current_message.strip():
         await client.send_message(chat_id, current_message)
 
+last_progress_display_time = 0
+
 async def progress_callback(current, total):
-    global uploaded_bytes_before_current_file, total_bytes_to_upload, upload_start_time
-    
+    global uploaded_bytes_before_current_file
+    global total_bytes_to_upload, upload_start_time
+    global last_progress_display_time
+
+    now = time.monotonic()
+
+    # Update the terminal at most once every 5 seconds.
+    if now - last_progress_display_time < 5 and current < total:
+        return
+
+    last_progress_display_time = now
+
     total_uploaded_now = uploaded_bytes_before_current_file + current
     elapsed_time = time.time() - upload_start_time
-    
+
     if elapsed_time > 0 and total_uploaded_now > 0:
         speed = total_uploaded_now / elapsed_time
         remaining_bytes = total_bytes_to_upload - total_uploaded_now
         eta_seconds = remaining_bytes / speed
         eta_str = format_time(eta_seconds)
     else:
-         eta_str = "Calculating..."
-         
-    percentage = (total_uploaded_now / total_bytes_to_upload) * 100 if total_bytes_to_upload > 0 else 0
-    print(f"\rUploading... {percentage:.1f}% | ETA: {eta_str}   ", end='', flush=True)
+        eta_str = "Calculating..."
+
+    percentage = (
+        total_uploaded_now / total_bytes_to_upload * 100
+        if total_bytes_to_upload > 0
+        else 0
+    )
+
+    print(
+        f"\rUploading... {percentage:.1f}% | ETA: {eta_str}   ",
+        end="",
+        flush=True,
+    )
 
 async def process_directory(base_path):
     global total_bytes_to_upload, uploaded_bytes_before_current_file, upload_start_time
@@ -175,20 +196,35 @@ async def process_directory(base_path):
                 
             file_size = os.path.getsize(file_path)
             
+            if file_size == 0:
+                print(f"Skipping empty file: {rel_file_path}")
+                continue
+            
             print(f"\nStarting upload for: {file_name}")
             
             mime_type, _ = mimetypes.guess_type(file_path)
-            if mime_type is None:
-                mime_type = ""
+            if file_name.lower().endswith(('.m4a', '.m4b')):
+                mime_type = 'audio/mp4'
+            elif mime_type is None:
+                mime_type = ''
+
+            audio_extensions = (
+                '.mp3', '.m4a', '.m4b', '.m4p', '.wav', '.flac', '.ogg', '.oga',
+                '.opus', '.aac', '.wma', '.amr', '.aiff', '.alac', '.ape', '.au',
+                '.wv', '.rm', '.ra', '.spx', '.mid', '.midi'
+            )
+
+            is_audio = mime_type.startswith('audio/') or file_name.lower().endswith(audio_extensions)
 
             while True:
                 try:
-                    if mime_type.startswith('audio/'):
-                         attributes = [DocumentAttributeAudio(duration=0, title=file_name, performer="")]
-                         await client.send_file(
+                    if is_audio:
+                        attributes = [DocumentAttributeAudio(duration=0, title=os.path.splitext(file_name)[0], performer="")]
+                        await client.send_file(
                             TARGET_CHAT_ID,
                             file_path,
                             caption=file_name,
+                            mime_type=mime_type,
                             attributes=attributes,
                             force_document=False,
                             progress_callback=progress_callback
@@ -200,16 +236,16 @@ async def process_directory(base_path):
                             caption=file_name,
                             progress_callback=progress_callback
                         )
-                    
+
                     save_to_history(base_path, rel_file_path)
                     uploaded_bytes_before_current_file += file_size
                     await asyncio.sleep(2)
                     break
-                    
+
                 except errors.FloodWaitError as e:
                     print(f"\n⏳ Telegram rate limit hit! Sleeping for {e.seconds} seconds to avoid ban...")
                     await asyncio.sleep(e.seconds)
-                    
+
                 except Exception as e:
                     print(f"\n❌ An error occurred while uploading {file_name}: {e}")
                     print("Stopping the script safely. You can restart to resume.")
