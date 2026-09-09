@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 import time
 import asyncio
 import mimetypes
@@ -128,7 +129,9 @@ async def progress_callback(current, total):
 
 async def process_directory(base_path):
     global total_bytes_to_upload, uploaded_bytes_before_current_file, upload_start_time
-    
+    global last_progress_display_time
+
+    last_progress_display_time = 0
     uploaded_history = load_history(base_path)
     is_resume = len(uploaded_history) > 0
     
@@ -149,7 +152,7 @@ async def process_directory(base_path):
                  
     if not files_to_upload_exist:
         print("All files in this directory have already been uploaded!")
-        return
+        return True
              
     uploaded_bytes_before_current_file = 0
     
@@ -245,7 +248,9 @@ async def process_directory(base_path):
                 except Exception as e:
                     print(f"\n❌ An error occurred while uploading {file_name}: {e}")
                     print("Stopping the script safely. You can restart to resume.")
-                    return 
+                    return False
+
+    return True
 
 async def main():
     global TARGET_CHAT_ID
@@ -260,14 +265,19 @@ async def main():
 
     if not os.path.isdir(folder_to_upload):
         print(f"Error: The path '{folder_to_upload}' is invalid or is not a directory.")
-        return
+        return 1
 
     print("Connecting to your Telegram account...")
     await client.start()
     print("Successfully connected! Starting process...")
     
-    await process_directory(folder_to_upload)
-    print("\n✅ Done! All files have been processed.")
+    completed = await process_directory(folder_to_upload)
+    if completed:
+        print("\n✅ Upload completed successfully. All files have been processed.")
+        return 0
+
+    print("\n❌ Upload incomplete. Some files were not uploaded. Restart to resume.")
+    return 1
 
 if __name__ == '__main__':
-    client.loop.run_until_complete(main())
+    sys.exit(client.loop.run_until_complete(main()))

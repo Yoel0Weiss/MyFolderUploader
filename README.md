@@ -43,18 +43,26 @@ A robust, automated Python script designed to upload large, multi-level director
    ```
    API_ID=your_api_id_here
    API_HASH=your_api_hash_here
-   TARGET_CHAT_ID=your_target_chat_id_here
    ```
-   (Note: TARGET_CHAT_ID can be a numeric ID like `-100123456789` or a public channel username like `@mychannel`)
+   The destination chat ID is supplied as a command-line argument.
 
 ## 🛠️ Usage
 
-1. **Run the script:**
+1. **Run the script with two arguments:**
    ```bash
-   python main.py
+   python main.py "C:\Path\To\Folder" -100123456789
    ```
+   The first argument is the directory to upload. The second argument is the Telegram destination chat or group ID.
 
-2. **Paste the full, absolute path** to the directory you want to upload when prompted.
+2. **PowerShell pipeline example:**
+   ```powershell
+   $folders = @("C:\Folder1", "C:\Folder2")
+   foreach ($folder in $folders) {
+       python .\main.py $folder -100123456789
+       if ($LASTEXITCODE -ne 0) { break }
+   }
+   ```
+   The next upload starts only when the previous command exits with code `0`. An incomplete upload exits with code `1` and can be resumed safely.
 
 3. **First Run Only:** You will be prompted to enter your phone number and the Telegram login code to generate the `uploader_session.session` file.
 
