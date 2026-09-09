@@ -4,4 +4,5 @@ venv/
 *.session
 __pycache__/
 uploaded_history.txt
-test
+test/
+.gitignore

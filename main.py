@@ -1,3 +1,4 @@
+import argparse
 import os
 import time
 import asyncio
@@ -11,12 +12,7 @@ from natsort import natsorted
 load_dotenv()
 API_ID = os.getenv('API_ID')
 API_HASH = os.getenv('API_HASH')
-TARGET_CHAT_ID = os.getenv('TARGET_CHAT_ID')
-
-try:
-    TARGET_CHAT_ID = int(TARGET_CHAT_ID)
-except (ValueError, TypeError):
-    pass
+TARGET_CHAT_ID = None
 
 mimetypes.init()
 
@@ -252,9 +248,16 @@ async def process_directory(base_path):
                     return 
 
 async def main():
-    raw_input = input("Enter the full path to the directory you want to upload: ")
-    folder_to_upload = os.path.abspath(raw_input.strip(' "\''))
-    
+    global TARGET_CHAT_ID
+
+    parser = argparse.ArgumentParser(description="Upload a directory to a Telegram chat.")
+    parser.add_argument("directory", help="Path to the directory to upload")
+    parser.add_argument("target_chat_id", type=int, help="Telegram destination chat or group ID")
+    args = parser.parse_args()
+
+    folder_to_upload = os.path.abspath(args.directory.strip(' "\''))
+    TARGET_CHAT_ID = args.target_chat_id
+
     if not os.path.isdir(folder_to_upload):
         print(f"Error: The path '{folder_to_upload}' is invalid or is not a directory.")
         return
