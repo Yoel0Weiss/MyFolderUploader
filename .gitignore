@@ -5,4 +5,6 @@ venv/
 __pycache__/
 uploaded_history.txt
 test/
+test - copy/
+pipeline.ps1
 .gitignore

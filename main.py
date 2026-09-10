@@ -6,7 +6,7 @@ import asyncio
 import mimetypes
 from dotenv import load_dotenv
 from telethon import TelegramClient, errors
-from telethon.tl.types import DocumentAttributeAudio
+from telethon.tl.types import DocumentAttributeAudio, DocumentAttributeVideo
 from natsort import natsorted
 
 # 1. Load secrets from .env file
@@ -213,7 +213,13 @@ async def process_directory(base_path):
                 '.wv', '.rm', '.ra', '.spx', '.mid', '.midi'
             )
 
+            video_extensions = (
+                '.mp4', '.m4v', '.mkv', '.mov', '.avi', '.wmv', '.flv', '.webm'
+            )
+
             is_audio = mime_type.startswith('audio/') or file_name.lower().endswith(audio_extensions)
+
+            is_video = mime_type.startswith('video/') or file_name.lower().endswith(video_extensions)
 
             while True:
                 try:
@@ -224,6 +230,17 @@ async def process_directory(base_path):
                             file_path,
                             caption=file_name,
                             mime_type=mime_type,
+                            attributes=attributes,
+                            force_document=False,
+                            progress_callback=progress_callback
+                        )
+                    
+                    elif is_video:
+                        attributes = [DocumentAttributeVideo(duration=0, w=0, h=0, supports_streaming=True)]
+                        await client.send_file(
+                            TARGET_CHAT_ID,
+                            file_path,
+                            caption=file_name,
                             attributes=attributes,
                             force_document=False,
                             progress_callback=progress_callback
