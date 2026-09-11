@@ -57,7 +57,7 @@ A robust, automated Python script designed to upload large, multi-level director
 2. **PowerShell pipeline example:**
    Save a script such as `pipeline.ps1` in the project directory. Replace the placeholder paths and destination IDs with your own values before running it:
    ```powershell
-   $projectPath = "C:\Users\My Computer\Documents\TelegramBulkDirectoryUploader"
+   $projectPath = (Resolve-Path (Join-Path $PSScriptRoot ".")).Path
    Set-Location -Path $projectPath
 
    $venvPython = Join-Path $projectPath "venv\Scripts\python.exe"

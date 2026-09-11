@@ -7,3 +7,4 @@ uploaded_history.txt
 test/
 test - copy/
 .gitignore
+pipeline.local.ps1
