@@ -50,19 +50,39 @@ A robust, automated Python script designed to upload large, multi-level director
 
 1. **Run the script with two arguments:**
    ```bash
-   python main.py "C:\Path\To\Folder" -100123456789
+   python main.py "C:\Path\To\Folder" "<destination-chat-id>"
    ```
    The first argument is the directory to upload. The second argument is the Telegram destination chat or group ID.
 
 2. **PowerShell pipeline example:**
+   Save a script such as `pipeline.ps1` in the project directory. Replace the placeholder paths and destination IDs with your own values before running it:
    ```powershell
-   $folders = @("C:\Folder1", "C:\Folder2")
-   foreach ($folder in $folders) {
-       python .\main.py $folder -100123456789
-       if ($LASTEXITCODE -ne 0) { break }
+   $projectPath = "C:\Users\My Computer\Documents\TelegramBulkDirectoryUploader"
+   Set-Location -Path $projectPath
+
+   $venvPython = Join-Path $projectPath "venv\Scripts\python.exe"
+   if (-Not (Test-Path $venvPython)) {
+       Write-Host "Virtual environment not found at $venvPython" -ForegroundColor Red
+       exit 1
+   }
+
+   $uploadJobs = [ordered]@{
+       "C:\Path\To\First\Folder"  = "<destination-chat-id>"
+       "C:\Path\To\Second\Folder" = "<destination-chat-id>"
+   }
+
+   foreach ($folder in $uploadJobs.Keys) {
+       $destinationChatId = $uploadJobs[$folder]
+       Write-Host "Starting upload for $folder..." -ForegroundColor Cyan
+
+       & $venvPython .\main.py $folder $destinationChatId
+       if ($LASTEXITCODE -ne 0) {
+           Write-Host "Upload failed or stopped. Remaining jobs will not run." -ForegroundColor Red
+           break
+       }
    }
    ```
-   The next upload starts only when the previous command exits with code `0`. An incomplete upload exits with code `1` and can be resumed safely.
+   The next upload starts only when the previous command exits with code `0`. An incomplete upload exits with code `1` and can be resumed safely. The ordered mapping lets each folder use its own destination chat or channel ID.
 
 3. **First Run Only:** You will be prompted to enter your phone number and the Telegram login code to generate the `uploader_session.session` file.
 
